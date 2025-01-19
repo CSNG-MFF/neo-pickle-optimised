@@ -104,7 +104,7 @@ def _new_spiketrain(cls, signal, t_stop, units=None, dtype=None, copy=True,
     if annotations is None:
         annotations = {}
     obj = SpikeTrain(signal, t_stop, units, dtype, copy, sampling_rate, t_start, waveforms,
-                     left_sweep, name, file_origin, description, array_annotations, **annotations)
+                     left_sweep, name, file_origin, description, array_annotations, being_unpickled=True,**annotations)
     obj.segment = segment
     obj.unit = unit
     return obj
@@ -259,60 +259,69 @@ class SpikeTrain(DataObject):
 
     def __new__(cls, times, t_stop, units=None, dtype=None, copy=True, sampling_rate=1.0 * pq.Hz,
                 t_start=0.0 * pq.s, waveforms=None, left_sweep=None, name=None, file_origin=None,
-                description=None, array_annotations=None, **annotations):
+                description=None, array_annotations=None, being_unpickled=False,**annotations):
         '''
         Constructs a new :class:`Spiketrain` instance from data.
 
         This is called whenever a new :class:`SpikeTrain` is created from the
         constructor, but not when slicing.
         '''
-        if len(times) != 0 and waveforms is not None and len(times) != waveforms.shape[0]:
-            # len(times)!=0 has been used to workaround a bug occurring during neo import
-            raise ValueError("the number of waveforms should be equal to the number of spikes")
+        if not being_unpickled:
+            if len(times) != 0 and waveforms is not None and len(times) != waveforms.shape[0]:
+               # len(times)!=0 has been used to workaround a bug occurring during neo import
+               raise ValueError("the number of waveforms should be equal to the number of spikes")
 
-        if dtype is not None and hasattr(times, 'dtype') and times.dtype != dtype:
-            if not copy:
-                raise ValueError("cannot change dtype and return view")
+            if dtype is not None and hasattr(times, 'dtype') and times.dtype != dtype:
+               if not copy:
+                  raise ValueError("cannot change dtype and return view")
 
-            # if t_start.dtype or t_stop.dtype != times.dtype != dtype,
-            # _check_time_in_range can have problems, so we set the t_start
-            # and t_stop dtypes to be the same as times before converting them
-            # to dtype below
-            # see ticket #38
-            if hasattr(t_start, 'dtype') and t_start.dtype != times.dtype:
-                t_start = t_start.astype(times.dtype)
-            if hasattr(t_stop, 'dtype') and t_stop.dtype != times.dtype:
-                t_stop = t_stop.astype(times.dtype)
+                  # if t_start.dtype or t_stop.dtype != times.dtype != dtype,
+                  # _check_time_in_range can have problems, so we set the t_start
+                  # and t_stop dtypes to be the same as times before converting them
+                  # to dtype below
+                  # see ticket #38
+                  if hasattr(t_start, 'dtype') and t_start.dtype != times.dtype:
+                     t_start = t_start.astype(times.dtype)
+                  if hasattr(t_stop, 'dtype') and t_stop.dtype != times.dtype:
+                     t_stop = t_stop.astype(times.dtype)
 
         # Make sure units are consistent
         # also get the dimensionality now since it is much faster to feed
         # that to Quantity rather than a unit
-        times, dim = normalize_times_array(times, units, dtype, copy)
 
-        # Construct Quantity from data
-        obj = times.view(cls)
+        if not being_unpickled:
+            times, dim = normalize_times_array(times, units, dtype, copy)
 
-        # spiketrain times always need to be 1-dimensional
-        if len(obj.shape) > 1:
-            raise ValueError("Spiketrain times array has more than 1 dimension")
+            # Construct Quantity from data
+            obj = times.view(cls)
 
-        # if the dtype and units match, just copy the values here instead
-        # of doing the much more expensive creation of a new Quantity
-        # using items() is orders of magnitude faster
-        if (hasattr(t_start, 'dtype')
-                and t_start.dtype == obj.dtype
-                and hasattr(t_start, 'dimensionality')
-                and t_start.dimensionality.items() == dim.items()):
-            obj.t_start = t_start.copy()
+            # spiketrain times always need to be 1-dimensional
+            if len(obj.shape) > 1:
+                 raise ValueError("Spiketrain times array has more than 1 dimension")
+
+            # if the dtype and units match, just copy the values here instead
+            # of doing the much more expensive creation of a new Quantity
+            # using items() is orders of magnitude faster
+            if (hasattr(t_start, 'dtype')
+                    and t_start.dtype == obj.dtype
+                    and hasattr(t_start, 'dimensionality')
+                    and t_start.dimensionality.items() == dim.items()):
+                obj.t_start = t_start.copy()
+            else:
+                obj.t_start = pq.Quantity(t_start, units=dim, dtype=obj.dtype)
+
+            if (hasattr(t_stop, 'dtype') and t_stop.dtype == obj.dtype
+                    and hasattr(t_stop, 'dimensionality')
+                    and t_stop.dimensionality.items() == dim.items()):
+               obj.t_stop = t_stop.copy()
+            else:
+               obj.t_stop = pq.Quantity(t_stop, units=dim, dtype=obj.dtype)
+
         else:
-            obj.t_start = pq.Quantity(t_start, units=dim, dtype=obj.dtype)
-
-        if (hasattr(t_stop, 'dtype') and t_stop.dtype == obj.dtype
-                and hasattr(t_stop, 'dimensionality')
-                and t_stop.dimensionality.items() == dim.items()):
-            obj.t_stop = t_stop.copy()
-        else:
-            obj.t_stop = pq.Quantity(t_stop, units=dim, dtype=obj.dtype)
+           times = pq.Quantity(times,units=units, dtype=dtype, copy=copy)
+           obj = times.view(cls)
+           obj.t_stop = t_stop
+           obj.t_start = t_start
 
         # Store attributes
         obj.waveforms = waveforms
@@ -324,7 +333,8 @@ class SpikeTrain(DataObject):
         obj.unit = None
 
         # Error checking (do earlier?)
-        _check_time_in_range(obj, obj.t_start, obj.t_stop, view=True)
+        if not being_unpickled:
+           _check_time_in_range(obj, obj.t_start, obj.t_stop, view=True)
 
         return obj
 
