@@ -285,11 +285,10 @@ class SpikeTrain(DataObject):
                   if hasattr(t_stop, 'dtype') and t_stop.dtype != times.dtype:
                      t_stop = t_stop.astype(times.dtype)
 
-        # Make sure units are consistent
-        # also get the dimensionality now since it is much faster to feed
-        # that to Quantity rather than a unit
+            # Make sure units are consistent
+            # also get the dimensionality now since it is much faster to feed
+            # that to Quantity rather than a unit
 
-        if not being_unpickled:
             times, dim = normalize_times_array(times, units, dtype, copy)
 
             # Construct Quantity from data
